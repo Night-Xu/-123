@@ -1,0 +1,136 @@
+import cv2
+import numpy as np
+import random
+
+
+
+def loadImageList(dirName, fileListPath):
+    imageList = []
+    file = open(dirName + '/' + fileListPath)
+    imageName = file.readline()
+    while imageName != '':
+        imageName = dirName + '/' + imageName.split('/', 1)[1].strip('\n')
+        # print imageName
+        imageList.append(cv2.imread(imageName))
+        imageName = file.readline()
+    return imageList
+
+
+def getPosSample(imageList):
+    posList = []
+    for i in range(len(imageList)):
+        roi = imageList[i][16:16 + 128, 16:16 + 64]
+        posList.append(roi)
+    return posList
+
+
+
+def getNegSample(imageList):
+    negList = []
+    random.seed(1)
+
+
+    for i in range(len(imageList)):
+       if imageList[i] is not None:
+        for j in range(10):
+            y = int(random.random() * (len(imageList[i]) - 128))
+            x = int(random.random() * (len(imageList[i][0]) - 64))
+            negList.append(imageList[i][y:y + 128, x:x + 64])
+
+    return negList
+
+
+
+
+def getHOGList(imageList):
+    HOGList = []
+    hog = cv2.HOGDescriptor()
+    for i in range(len(imageList)):
+        gray = cv2.cvtColor(imageList[i], cv2.COLOR_BGR2GRAY)
+        HOGList.append(hog.compute(gray))
+    return HOGList
+
+
+def getHOGDetector(svm):
+    sv = svm.getSupportVectors()
+    rho, _, _ = svm.getDecisionFunction(0)
+    sv = np.transpose(sv)
+    return np.append(sv, [[-rho]], 0)
+
+
+
+def getHardExamples(negImageList, svm):
+    hardNegList = []
+    hog = cv2.HOGDescriptor()
+    hog.setSVMDetector(getHOGDetector(svm))
+    for i in range(len(negImageList)):
+        rects, wei = hog.detectMultiScale(negImageList[i], winStride=(4, 4), padding=(8, 8), scale=1.05)
+        for (x, y, w, h) in rects:
+            hardExample = negImageList[i][y:y + h, x:x + w]
+            hardNegList.append(cv2.resize(hardExample, (64, 128)))
+    return hardNegList
+
+
+
+
+
+labels = []
+posImageList = []
+posList = []
+posImageList = []
+posList = []
+hosList = []
+tem = []
+hardNegList = []
+
+posImageList = loadImageList("D:/INRIAPerson/train_64x128_H96","pos.lst")
+print("posImageList:", len(posImageList))
+
+posList = getPosSample(posImageList)
+print("posList", len(posList))
+
+hosList = getHOGList(posList)
+print("hosList", len(hosList))
+
+[labels.append(+1) for _ in range(len(posList))]
+
+
+negImageList = loadImageList("D:/INRIAPerson/train_64x128_H96", "neg.lst")
+print("negImageList:", len(negImageList))
+
+negList = getNegSample(negImageList)
+print("negList", len(negList))
+
+hosList.extend(getHOGList(negList))
+print("hosList", len(hosList))
+
+[labels.append(-1) for _ in range(len(negList))]
+print("labels", len(labels))
+
+
+svm = cv2.ml.SVM_create()
+svm.setCoef0(0.0)
+svm.setDegree(3)
+criteria = (cv2.TERM_CRITERIA_MAX_ITER + cv2.TERM_CRITERIA_EPS, 1000, 1e-3)  
+svm.setTermCriteria(criteria)
+svm.setGamma(0)
+svm.setKernel(cv2.ml.SVM_LINEAR)
+svm.setNu(0.5)
+svm.setP(0.1)  
+svm.setC(0.01)  
+svm.setType(cv2.ml.SVM_EPS_SVR)  
+svm.train(np.array(hosList), cv2.ml.ROW_SAMPLE, np.array(labels))
+
+
+hardNegList = getHardExamples(negImageList,svm)
+hosList.extend(getHOGList(hardNegList))
+print("hosList=====", len(hosList))
+[labels.append(-1) for _ in range(len(hardNegList))]
+
+
+svm.train(np.array(hosList), cv2.ml.ROW_SAMPLE, np.array(labels))
+
+
+hog = cv2.HOGDescriptor()
+hog.setSVMDetector(getHOGDetector(svm))
+hog.save('myHogDector.bin')
